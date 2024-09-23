@@ -1,0 +1,2 @@
+- Use the Java 11 HTTP client classes to build the API
+- POSTMAN test url: http://localhost:8080/SkierServlet_war_exploded/skiers
