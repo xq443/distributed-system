@@ -32,7 +32,7 @@ public class MultiThreadWorker {
         new ThreadPoolExecutor.CallerRunsPolicy()
     );
 
-    // Start posting threads immediately
+    // Start posting threads immediately: avoiding integer division issues where requests might be left unhandled.
     for (int i = 0; i < (TOTAL_REQUESTS + REQUESTS_PER_THREAD - 1) / REQUESTS_PER_THREAD; i++) {
       executor.execute(new PostingRequestThread());
     }
