@@ -2,22 +2,34 @@ package com.cathy.part1;
 
 import com.cathy.bean.LiftRideEvent;
 import com.google.gson.Gson;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
+import java.net.URI;
+import java.time.Duration;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import javax.servlet.http.HttpServletResponse;
 
 public class PostingRequestThread implements Runnable {
   private static final int MAX_RETRIES = 5;
+  private static final HttpClient httpClient = HttpClient.newHttpClient(); // Create a shared HttpClient instance
+  private static final Gson gson = new Gson(); // Create a Gson instance for JSON conversion
 
   @Override
   public void run() {
     for (int i = 0; i < MultiThreadWorker.REQUESTS_PER_THREAD; i++) {
-      try {
-        LiftRideEvent event = MultiThreadWorker.getEventQueue().take(); // Blocking call
-        sendPostRequest(event);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
+      LiftRideEvent event = null;
+      while (event == null) {
+        event = MultiThreadWorker.getEventQueue().poll(); // Non-blocking call
+        if (event == null) {
+          try {
+            Thread.sleep(10); // Backoff if no event is available
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // Restore interrupt status
+            return; // Exit if interrupted
+          }
+        }
       }
+      sendPostRequest(event);
     }
   }
 
@@ -26,7 +38,7 @@ public class PostingRequestThread implements Runnable {
     boolean success = false;
     while (attempts < MAX_RETRIES && !success) {
       int responseCode = sendRequest(event);
-      if (responseCode == 201) {
+      if (responseCode == HttpServletResponse.SC_CREATED) {
         MultiThreadWorker.getSuccessfulRequests().incrementAndGet();
         success = true;
       } else {
@@ -34,29 +46,29 @@ public class PostingRequestThread implements Runnable {
         attempts++;
       }
     }
+
+    if (!success) {
+      System.out.println("Failed to send request after " + MAX_RETRIES + " attempts: " + event);
+    }
   }
 
   private int sendRequest(LiftRideEvent event) {
-    Gson gson = new Gson();
     String jsonInputString = gson.toJson(event); // Convert the LiftRideEvent object to JSON
 
     try {
-      URL url = new URL("http://localhost:8080/SkierServlet_war_exploded/skiers"); // Replace with your actual URL
-      HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-      conn.setRequestMethod("POST");
-      conn.setRequestProperty("Content-Type", "application/json");
-      conn.setDoOutput(true);
+      HttpRequest request = HttpRequest.newBuilder()
+          .uri(URI.create("http://localhost:8080/SkierServlet_war_exploded/skies")) // Use your actual URL
+          .timeout(Duration.ofMinutes(2))
+          .header("Content-Type", "application/json")
+          .POST(HttpRequest.BodyPublishers.ofString(jsonInputString))
+          .build();
 
+      HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-      try (var os = conn.getOutputStream()) {
-        byte[] input = jsonInputString.getBytes(StandardCharsets.UTF_8);
-        os.write(input, 0, input.length);
-      }
-
-      return conn.getResponseCode();
+      return response.statusCode();
     } catch (Exception e) {
-      System.out.println(e.getMessage());
-      return 500; // Simulate a server error for testing
+      System.out.println("Error sending request: " + e.getMessage());
+      return HttpServletResponse.SC_INTERNAL_SERVER_ERROR; // Simulate a server error for testing
     }
   }
 }

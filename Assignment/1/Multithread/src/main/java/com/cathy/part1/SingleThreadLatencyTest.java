@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import javax.servlet.http.HttpServletResponse;
 
 public class SingleThreadLatencyTest {
-  private static final int TOTAL_REQUESTS = 10_000;
+  private static final int TOTAL_REQUESTS = 10000;
 
   public static void main(String[] args) {
     long startTime = System.currentTimeMillis();
@@ -32,8 +32,8 @@ public class SingleThreadLatencyTest {
         (int) (Math.random() * 10) + 1, // resortID between 1 and 10
         "2024",
         "1",
-        (int) (Math.random() * 100_000) + 1, // skierID between 1 and 100000
         (int) (Math.random() * 360) + 1, // time between 1 and 360
+        (int) (Math.random() * 100_000) + 1, // skierID between 1 and 100000
         (int) (Math.random() * 40) + 1 // liftID between 1 and 40
     );
   }
@@ -43,7 +43,7 @@ public class SingleThreadLatencyTest {
     String jsonInputString = gson.toJson(event); // Convert the LiftRideEvent object to JSON
 
     try {
-      URL url = new URL("http://localhost:8080/SkierServlet_war_exploded/skiers"); // Replace with your actual URL
+      URL url = new URL("http://localhost:8080/SkierServlet_war_exploded/skiers");
       HttpURLConnection conn = (HttpURLConnection) url.openConnection();
       conn.setRequestMethod("POST");
       conn.setRequestProperty("Content-Type", "application/json");
@@ -54,6 +54,7 @@ public class SingleThreadLatencyTest {
         os.write(input, 0, input.length);
       }
 
+      // Log the response code and potentially the error message if needed
       return conn.getResponseCode();
     } catch (Exception e) {
       System.out.println("Error sending request: " + e.getMessage());
