@@ -1,6 +1,7 @@
 package com.cathy;
 
 import com.cathy.bean.RequestData;
+import com.cathy.bean.ResponseData;
 import com.google.gson.Gson;
 import javax.servlet.*;
 import javax.servlet.http.*;
@@ -31,7 +32,8 @@ public class SkierServlet extends HttpServlet {
       String missingParams = areParametersMissing(requestData);
       if (!missingParams.isEmpty()) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST); // 400: Bad Request
-        response.getWriter().write("Missing parameters: " + missingParams);
+        //response.getWriter().write("Missing parameters: " + missingParams);
+        response.getOutputStream().print(gson.toJson(new ResponseData("Missing parameters: " + missingParams)));
         return;
       }
 
@@ -39,18 +41,20 @@ public class SkierServlet extends HttpServlet {
       String invalidParams = areParametersValid(requestData);
       if (!invalidParams.isEmpty()) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST); // 400: Invalid inputs
-        response.getWriter().write("Invalid inputs: " + invalidParams);
+        //response.getWriter().write("Invalid inputs: " + invalidParams);
+        response.getOutputStream().print(gson.toJson(new ResponseData("Invalid inputs: " + invalidParams)));
         return;
       }
 
-      response.setStatus(HttpServletResponse.SC_OK); // 200: OK
-      response.getWriter().write(gson.toJson(requestData));
+      response.setStatus(HttpServletResponse.SC_CREATED); // 201: Done, and created
+      response.getOutputStream().print(gson.toJson(requestData));
 
     } catch (IOException e) {
       response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-        response.getWriter().write("Web Server Error: " + e.getMessage());
+        //response.getWriter().write("Web Server Error: " + e.getMessage());
+        response.getOutputStream().print(gson.toJson(new ResponseData("Web Server Error: " + e.getMessage())));
     } finally {
-      response.getWriter().flush();
+      response.getOutputStream().flush();
     }
   }
 
@@ -100,7 +104,9 @@ public class SkierServlet extends HttpServlet {
   @Override
   protected void doGet(HttpServletRequest request, HttpServletResponse response)
       throws IOException {
+    Gson gson = new Gson();
     response.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
-    response.getWriter().write("GET method is not supported in this assignment. Please use POST.");
+    //response.getWriter().write("GET method is not supported in this assignment. Please use POST.");
+    response.getOutputStream().print(gson.toJson(new ResponseData("GET method is not supported in this assignment. Please use POST.")));
   }
 }
