@@ -2,13 +2,16 @@ package com.cathy.part1;
 
 import com.cathy.bean.LiftRideEvent;
 import com.google.gson.Gson;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import javax.servlet.http.HttpServletResponse;
 
 public class SingleThreadLatencyTest {
-  private static final int TOTAL_REQUESTS = 10000;
+  private static final int TOTAL_REQUESTS = 1000;
+  private static final HttpClient httpClient = HttpClient.newHttpClient();
+  private static final Gson gson = new Gson();
 
   public static void main(String[] args) {
     long startTime = System.currentTimeMillis();
@@ -39,23 +42,18 @@ public class SingleThreadLatencyTest {
   }
 
   private static int sendRequest(LiftRideEvent event) {
-    Gson gson = new Gson();
     String jsonInputString = gson.toJson(event); // Convert the LiftRideEvent object to JSON
 
     try {
-      URL url = new URL("http://localhost:8080/SkierServlet_war_exploded/skiers");
-      HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-      conn.setRequestMethod("POST");
-      conn.setRequestProperty("Content-Type", "application/json");
-      conn.setDoOutput(true);
+      HttpRequest request = HttpRequest.newBuilder()
+          .uri(URI.create("http://34.212.217.208:8080/SkierServlet_war/skiers"))
+          .header("Content-Type", "application/json")
+          .POST(HttpRequest.BodyPublishers.ofString(jsonInputString))
+          .build();
 
-      try (var os = conn.getOutputStream()) {
-        byte[] input = jsonInputString.getBytes(StandardCharsets.UTF_8);
-        os.write(input, 0, input.length);
-      }
+      HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-      // Log the response code and potentially the error message if needed
-      return conn.getResponseCode();
+      return response.statusCode();
     } catch (Exception e) {
       System.out.println("Error sending request: " + e.getMessage());
       return HttpServletResponse.SC_INTERNAL_SERVER_ERROR; // Simulate a server error for testing

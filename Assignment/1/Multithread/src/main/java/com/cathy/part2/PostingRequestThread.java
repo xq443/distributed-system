@@ -1,12 +1,12 @@
-package com.cathy.part1;
+package com.cathy.part2;
 
 import com.cathy.bean.LiftRideEvent;
 import com.google.gson.Gson;
 import java.net.URI;
-import java.time.Duration;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import javax.servlet.http.HttpServletResponse;
 
 public class PostingRequestThread implements Runnable {

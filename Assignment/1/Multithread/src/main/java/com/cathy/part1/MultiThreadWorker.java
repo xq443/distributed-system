@@ -2,6 +2,7 @@ package com.cathy.part1;
 
 import com.cathy.bean.LiftRideEvent;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -11,7 +12,7 @@ public class MultiThreadWorker {
   static final int TOTAL_REQUESTS = 200000;
   static final int INITIAL_THREADS = 64;
   static final int REQUESTS_PER_THREAD = 10;
-  private static final BlockingQueue<LiftRideEvent> eventQueue = new LinkedBlockingQueue<>(TOTAL_REQUESTS * 4);
+  private static final BlockingQueue<LiftRideEvent> eventQueue = new LinkedBlockingQueue<>(TOTAL_REQUESTS * 2);
   private static final AtomicInteger successfulRequests = new AtomicInteger(0);
   private static final AtomicInteger failedRequests = new AtomicInteger(0);
 
@@ -19,6 +20,8 @@ public class MultiThreadWorker {
     // Start request generation
     Thread eventGeneratorThread = new Thread(new EventGenerator());
     eventGeneratorThread.start();
+
+    CountDownLatch latch = new CountDownLatch(TOTAL_REQUESTS);
 
     long startTime = System.currentTimeMillis();
 
@@ -39,7 +42,7 @@ public class MultiThreadWorker {
 
     // Wait for event generation to complete
     try {
-      eventGeneratorThread.join(); // Wait for event generation to finish
+      latch.await(); // Wait for all threads to finish
     } catch (InterruptedException e) {
       System.out.println("Main thread was interrupted: " + e.getMessage());
       Thread.currentThread().interrupt();
