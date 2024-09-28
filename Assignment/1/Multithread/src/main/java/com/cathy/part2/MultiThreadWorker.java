@@ -11,18 +11,17 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MultiThreadWorker {
-  static final int TOTAL_REQUESTS = 200000;
-  static final int INITIAL_THREADS = 64;
-  static final int REQUESTS_PER_THREAD = 10;
-  private static final BlockingQueue<LiftRideEvent> eventQueue = new LinkedBlockingQueue<>(TOTAL_REQUESTS * 2);
+  public static final int TOTAL_REQUESTS = 200000;
+  public static final int INITIAL_THREADS = 190;
+  public static final int REQUESTS_PER_THREAD = 10;
+  private static final BlockingQueue<LiftRideEvent> eventQueue = new LinkedBlockingQueue<>(TOTAL_REQUESTS * 4);
   private static final AtomicInteger successfulRequests = new AtomicInteger(0);
   private static final AtomicInteger failedRequests = new AtomicInteger(0);
-  private static PrintWriter fileWriter;
   private static final ConcurrentLinkedQueue<Long> latencies = new ConcurrentLinkedQueue<>(); // for better concurrency without overhead lock
 
   public static void main(String[] args) throws IOException {
-    // Setup the CSV file
-    fileWriter = new PrintWriter(new FileWriter("test.csv"));
+    // Set up the CSV file
+    PrintWriter fileWriter = new PrintWriter(new FileWriter("test.csv"));
     fileWriter.println("StartTime,RequestType,Latency,ResponseCode");
 
     // Start event generation in a separate thread
@@ -41,34 +40,22 @@ public class MultiThreadWorker {
         new ThreadPoolExecutor.CallerRunsPolicy()
     );
 
-    CountDownLatch latch = new CountDownLatch(TOTAL_REQUESTS);
+    CountDownLatch latch = new CountDownLatch(TOTAL_REQUESTS); // Change TOTAL_REQUESTS to INITIAL_THREADS
 
     // Start PostingRequestThreads
     int numTasks = (TOTAL_REQUESTS + REQUESTS_PER_THREAD - 1) / REQUESTS_PER_THREAD;
     for (int i = 0; i < numTasks; i++) {
-      executor.execute(new PostingRequestThread());
+      executor.execute(new PostingRequestThread(latch, latencies, fileWriter)); // Pass latch to the PostingRequestThread
     }
 
     // Wait for all threads to finish and shutdown executor
     try {
-      latch.await();
+      latch.await(); // Wait for all threads to complete
     } catch (InterruptedException e) {
       System.err.println("Main thread interrupted: " + e.getMessage());
       Thread.currentThread().interrupt();
-    }
-
-    executor.shutdown();
-    try {
-      if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
-        executor.shutdownNow();
-      }
-    } catch (InterruptedException e) {
-      executor.shutdownNow();
-      Thread.currentThread().interrupt();
-    }
-
-    // Close the PrintWriter after all threads complete
-    if (fileWriter != null) {
+    } finally {
+      // Close the PrintWriter after all threads complete
       fileWriter.flush();
       fileWriter.close();
     }
@@ -80,6 +67,7 @@ public class MultiThreadWorker {
     System.out.println("Total time: " + totalTime + " ms");
     System.out.println("Throughput: " + (TOTAL_REQUESTS / (totalTime / 1000.0)) + " requests/second");
     generatePerformanceMetrics();
+    executor.shutdown();
   }
 
   private static void generatePerformanceMetrics() {
@@ -115,7 +103,6 @@ public class MultiThreadWorker {
     return failedRequests;
   }
 
-  // Add latencies safely
   public static void addLatency(long latency) {
     latencies.add(latency);
   }
