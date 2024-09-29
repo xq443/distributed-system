@@ -24,6 +24,7 @@ public class LiftRideServiceImpl implements LiftRideService {
     }
   }
 
+  // todo: try to refactor the validation as a helper function instead of using validator
   @Override
   public LiftRide saveCourse(LiftRide liftRide) {
     return liftRideRepository.save(liftRide);
