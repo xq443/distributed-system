@@ -29,7 +29,7 @@ public class LiftRideController {
 
   @PostMapping
   public ResponseEntity<LiftRide> saveLiftRide(@Valid @RequestBody LiftRide liftRide) {
-    return new ResponseEntity<>(liftRideService.saveCourse(liftRide), HttpStatus.CREATED);
+    return new ResponseEntity<>(liftRideService.saveLiftRide(liftRide), HttpStatus.CREATED);
   }
 
   @DeleteMapping("/{id}")

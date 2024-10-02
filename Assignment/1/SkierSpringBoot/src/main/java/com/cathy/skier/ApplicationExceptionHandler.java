@@ -23,6 +23,8 @@ public class ApplicationExceptionHandler extends ResponseEntityExceptionHandler 
     ErrorResponse error = new ErrorResponse(Collections.singletonList(ex.getMessage()));
     return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
   }
+
+  // add all error msgs into the error list
   @Override
   protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex, HttpHeaders headers, HttpStatus status, WebRequest request) {
     List<String> errors = new ArrayList<>();
