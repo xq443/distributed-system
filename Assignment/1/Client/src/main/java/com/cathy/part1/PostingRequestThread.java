@@ -14,7 +14,7 @@ public class PostingRequestThread implements Runnable {
   private static final int MAX_RETRIES = 5;
   private static final HttpClient httpClient = HttpClient.newHttpClient(); // Shared HttpClient instance
   private static final Gson gson = new Gson(); // Gson instance for JSON conversion
-  private static final String POST_URL = "http://44.243.214.74:8080/skiers"; // Endpoint URL
+  private static final String POST_URL = "http://34.217.110.73:8080/SkierServlet_war/skiers"; // Endpoint URL
   private final CountDownLatch latch;
 
   // Constructor to receive latch

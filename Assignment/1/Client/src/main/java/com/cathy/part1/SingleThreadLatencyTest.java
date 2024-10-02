@@ -13,7 +13,8 @@ public class SingleThreadLatencyTest {
   private static final int TOTAL_REQUESTS = 10000;
   private static final HttpClient httpClient = HttpClient.newHttpClient();
   private static final Gson gson = new Gson();
-  private static final String POST_URL = "http://localhost:8080/skiers"; // Endpoint URL "http://54.190.44.136:8080/SkierServlet_war/skiers"
+  // this is for springboot local test
+  private static final String POST_URL = "http://localhost:8080/skiers"; // Endpoint URL for servlet on EC2: "http://54.190.44.136:8080/SkierServlet_war/skiers"
 
 
   public static void main(String[] args) {
