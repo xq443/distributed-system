@@ -3,26 +3,59 @@ package com.cathy;
 import com.cathy.bean.RequestData;
 import com.cathy.bean.ResponseData;
 import com.google.gson.Gson;
-import javax.servlet.*;
-import javax.servlet.http.*;
-import javax.servlet.annotation.*;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+
+import javax.servlet.annotation.WebServlet;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeoutException;
 
 @WebServlet("/")
 public class SkierServlet extends HttpServlet {
 
+  private final static String QUEUE_NAME = "SkierQueue";
+  private static final ConnectionFactory factory = new ConnectionFactory();
+  private static final int CHANNEL_POOL_SIZE = 120;
+  private static final BlockingQueue<Channel> channelPool = new LinkedBlockingQueue<>(
+      CHANNEL_POOL_SIZE);
+  private final Gson gson = new Gson();
+
+  @Override
+  public void init() {
+    factory.setHost("54.184.136.34");
+    factory.setConnectionTimeout(300000); // Set timeout to 30 seconds
+    try {
+      Connection connection = factory.newConnection();
+      for (int i = 0; i < CHANNEL_POOL_SIZE; i++) {
+        Channel channel = connection.createChannel();
+        channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+        channelPool.add(channel);
+      }
+    } catch (IOException e) {
+      throw new RuntimeException("Error initializing RabbitMQ connection: " + e.getMessage(), e);
+    } catch (TimeoutException e) {
+      throw new RuntimeException("Connection to RabbitMQ timed out: " + e.getMessage(), e);
+    }
+  }
+
   @Override
   protected void doPost(HttpServletRequest request, HttpServletResponse response)
       throws IOException {
-    Gson gson = new Gson();
     response.setContentType("application/json");
 
-    // Read and handle JSON Request
     StringBuilder bodyBuilder = new StringBuilder();
-    String temp;
-    while ((temp = request.getReader().readLine()) != null) {
-      bodyBuilder.append(temp);
+    String line;
+    while ((line = request.getReader().readLine()) != null) {
+      bodyBuilder.append(line);
     }
+
+    System.out.println("Received request body: " + bodyBuilder.toString()); // Log the request body
 
     try {
       // Parse the JSON body into a RequestData object
@@ -31,34 +64,58 @@ public class SkierServlet extends HttpServlet {
       // Validate missing parameters
       String missingParams = areParametersMissing(requestData);
       if (!missingParams.isEmpty()) {
-        response.setStatus(HttpServletResponse.SC_BAD_REQUEST); // 400: Bad Request
-        //response.getWriter().write("Missing parameters: " + missingParams);
-        response.getOutputStream().print(gson.toJson(new ResponseData("Missing parameters: " + missingParams)));
+        response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        response.getOutputStream()
+            .print(gson.toJson(new ResponseData("Missing parameters: " + missingParams)));
         return;
       }
 
       // Validate parameter values
       String invalidParams = areParametersValid(requestData);
       if (!invalidParams.isEmpty()) {
-        response.setStatus(HttpServletResponse.SC_BAD_REQUEST); // 400: Invalid inputs
-        //response.getWriter().write("Invalid inputs: " + invalidParams);
-        response.getOutputStream().print(gson.toJson(new ResponseData("Invalid inputs: " + invalidParams)));
+        response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        response.getOutputStream()
+            .print(gson.toJson(new ResponseData("Invalid inputs: " + invalidParams)));
         return;
       }
 
-      response.setStatus(HttpServletResponse.SC_CREATED); // 201: Done, and created
+      String skierID = requestData.getSkierID().toString(); // Assuming skierID is of type Integer
+      String message = packageMessage(bodyBuilder.toString(), skierID);
+
+
+      // Send data to RabbitMQ message queue
+      sendToMessageQueue(message);
+      response.setStatus(HttpServletResponse.SC_CREATED);
       response.getOutputStream().print(gson.toJson(requestData));
 
     } catch (IOException e) {
       response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-        //response.getWriter().write("Web Server Error: " + e.getMessage());
-        response.getOutputStream().print(gson.toJson(new ResponseData("Web Server Error: " + e.getMessage())));
+      response.getOutputStream()
+          .print(gson.toJson(new ResponseData("Web Server Error: " + e.getMessage())));
     } finally {
       response.getOutputStream().flush();
     }
   }
 
-  // Helper method to check if input parameters are missing
+  private void sendToMessageQueue(String message) {
+    Channel channel = channelPool.poll();
+    if (channel == null) {
+      throw new RuntimeException("No available channels in the pool.");
+    }
+    try {
+      channel.basicPublish("", QUEUE_NAME, null, message.getBytes());
+      System.out.println(" [x] Sent '" + message + "'");
+    } catch (IOException e) {
+      throw new RuntimeException("Error sending message to RabbitMQ: " + e.getMessage(), e);
+    } finally {
+      channelPool.offer(channel);
+    }
+  }
+
+  private String packageMessage(String body, String skierID) {
+    return "{\"body\":" + body + ", \"skierID\":\"" + skierID + "\"}";
+  }
+
   private String areParametersMissing(RequestData requestData) {
     StringBuilder missingParams = new StringBuilder();
 
@@ -72,10 +129,9 @@ public class SkierServlet extends HttpServlet {
     if (requestData.getDayID() == null) missingParams.append("dayID, ");
     if (requestData.getTime() == null) missingParams.append("time, ");
 
-    return missingParams.toString().isEmpty() ? "" : missingParams.substring(0, missingParams.length() - 2); // Remove last comma and space
+    return missingParams.toString().isEmpty() ? "" : missingParams.substring(0, missingParams.length() - 2);
   }
 
-  // Helper method to validate the input parameter values
   private String areParametersValid(RequestData requestData) {
     StringBuilder invalidParams = new StringBuilder();
 
@@ -98,15 +154,12 @@ public class SkierServlet extends HttpServlet {
       invalidParams.append("time, ");
     }
 
-    return invalidParams.toString().isEmpty() ? "" : invalidParams.substring(0, invalidParams.length() - 2); // Remove last comma and space
+    return invalidParams.toString().isEmpty() ? "" : invalidParams.substring(0, invalidParams.length() - 2);
   }
 
   @Override
-  protected void doGet(HttpServletRequest request, HttpServletResponse response)
-      throws IOException {
-    Gson gson = new Gson();
+  protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
     response.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
-    //response.getWriter().write("GET method is not supported in this assignment. Please use POST.");
     response.getOutputStream().print(gson.toJson(new ResponseData("GET method is not supported in this assignment. Please use POST.")));
   }
 }

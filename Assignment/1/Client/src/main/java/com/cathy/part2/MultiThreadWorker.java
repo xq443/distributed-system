@@ -103,7 +103,4 @@ public class MultiThreadWorker {
     return failedRequests;
   }
 
-  public static void addLatency(long latency) {
-    latencies.add(latency);
-  }
 }

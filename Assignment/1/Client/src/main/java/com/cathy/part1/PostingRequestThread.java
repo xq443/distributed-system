@@ -2,6 +2,7 @@ package com.cathy.part1;
 
 import com.cathy.bean.LiftRideEvent;
 import com.google.gson.Gson;
+
 import java.net.URI;
 import java.time.Duration;
 import java.net.http.HttpClient;
@@ -14,7 +15,7 @@ public class PostingRequestThread implements Runnable {
   private static final int MAX_RETRIES = 5;
   private static final HttpClient httpClient = HttpClient.newHttpClient(); // Shared HttpClient instance
   private static final Gson gson = new Gson(); // Gson instance for JSON conversion
-  private static final String POST_URL = "http://34.217.110.73:8080/SkierServlet_war/skiers"; // Endpoint URL
+  private static final String POST_URL = "http://localhost:8080/SkierServlet_war_exploded/skiers"; // Endpoint URL
   private final CountDownLatch latch;
 
   // Constructor to receive latch
@@ -25,13 +26,19 @@ public class PostingRequestThread implements Runnable {
   @Override
   public void run() {
     try {
-      for (int i = 0; i < MultiThreadWorker.REQUESTS_PER_THREAD; i++) {
+      for (int i = 0; i < MultiThreadWorker.REQUESTS_PER_THREAD_INITIAL; i++) {
         LiftRideEvent liftRide = MultiThreadWorker.getEventQueue().poll();
         if (liftRide == null) {
           break;
         }
         // Try sending the POST request
         sendPostRequest(liftRide);
+      }
+
+      // If this thread is the first to complete
+      if (!MultiThreadWorker.isFirstThreadCompleted()) {
+        MultiThreadWorker.setFirstThreadCompleted(true);
+        latch.countDown(); // Signal that a thread has completed
       }
     } catch (Exception e) {
       System.out.println(e.getMessage());
@@ -55,8 +62,6 @@ public class PostingRequestThread implements Runnable {
         }
       } catch (Exception e) {
         System.err.println("Exception when calling API for " + event + e.getMessage());
-      } finally {
-        this.latch.countDown();
       }
     }
 
