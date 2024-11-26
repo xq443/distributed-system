@@ -7,10 +7,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class MultiThreadWorker {
   public static final int TOTAL_REQUESTS = 200000;
-  public static final int THREADS = 200;
-  public static final int REQUESTS_PER_THREAD = 100;
+  public static final int THREADS = 120;
+  public static final int REQUESTS_PER_THREAD = 10;
 
-  private static final BlockingQueue<LiftRideEvent> eventQueue = new LinkedBlockingQueue<>(TOTAL_REQUESTS * 3);
+  private static final BlockingQueue<LiftRideEvent> eventQueue = new LinkedBlockingQueue<>(TOTAL_REQUESTS * 2);
   private static final AtomicInteger successfulRequests = new AtomicInteger(0);
   private static final AtomicInteger failedRequests = new AtomicInteger(0);
   private static final CountDownLatch latch = new CountDownLatch(TOTAL_REQUESTS); // Latch for total requests
