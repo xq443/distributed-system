@@ -3,89 +3,96 @@ package consumer;
 import com.google.gson.Gson;
 import com.rabbitmq.client.*;
 import redis.clients.jedis.Jedis;
-import java.util.Map;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
+
+import java.io.IOException;
 import java.util.concurrent.*;
 
 public class LiftRideConsumer {
 
   private static final String QUEUE_NAME = "SkierQueue";
-  private static Jedis redis;
+  private static final int THREAD_POOL_SIZE = 320;
+  private static final ConnectionFactory factory = new ConnectionFactory();
+  private static final Gson gson = new Gson();
+  private static final ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
-  public static void main(String[] argv) throws Exception {
-    // Initialize Redis connection
-    redis = new Jedis("54.202.226.237", 6379);
+  private static final JedisPool jedisPool = new JedisPool(new JedisPoolConfig(), "35.89.186.254", 6379); // host same as consumer
 
-    // Setup RabbitMQ connection factory
-    ConnectionFactory factory = new ConnectionFactory();
-    factory.setHost("34.210.18.112");  // RabbitMQ instance IP
+  private static Connection connection;
+  private static Channel channel;
 
-    // Create executor service for concurrent task handling
-    ExecutorService executorService = Executors.newFixedThreadPool(100);
+  public static void main(String[] args) {
+    try {
+      // Initialize RabbitMQ connection and channel
+      factory.setHost("54.186.130.49");
+      connection = factory.newConnection();
+      channel = connection.createChannel();
+      channel.queueDeclare(QUEUE_NAME, false, false, false, null);
 
-    // Establish RabbitMQ connection and channel
-    Connection connection = factory.newConnection();
-    Channel channel = connection.createChannel();
-    channel.queueDeclare(QUEUE_NAME, false, false, false, null);
-    System.out.println(" - Waiting for messages.");
-
-    // Deliver callback with manual acknowledgment
-    DeliverCallback deliverCallback = (consumerTag, delivery) -> {
-      String message = new String(delivery.getBody(), "UTF-8");
-      //System.out.println("Received: " + message);
-
-      // Deserialize message into LiftRide object
-      LiftRide liftRide = new Gson().fromJson(message, LiftRide.class);
-      if (liftRide == null) {
-        System.err.println("Invalid LiftRide data, skipping processing.");
-        return;
+      // Submit consumers to thread pool
+      for (int i = 0; i < THREAD_POOL_SIZE; i++) {
+        executorService.submit(() -> consumeMessages(channel));
       }
 
-      // Extract headers from the message
-      Map<String, Object> headers = delivery.getProperties().getHeaders();
-      if (headers == null) {
-        System.err.println("Headers are missing, skipping processing.");
-        return;
-      }
+      // Add a shutdown hook to clean up resources when the program exits
+      Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        destroy(); // Call the destroy method
+        System.out.println("Consumer application terminated.");
+      }));
 
-      try {
-        // Extract specific headers for processing
-        int resortID = (int) headers.get("resortID");
-        String seasonID = headers.get("seasonID").toString();
-        String dayID = headers.get("dayID").toString();
-        int skierID = (int) headers.get("skierID");
+      executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
 
-        // Process the message into Redis
-        passLiftRideEvent(liftRide, skierID, resortID, seasonID, dayID);
-      } catch (Exception e) {
-        System.err.println("Error processing headers: " + e.getMessage());
-      }
-    };
-
-    // Start consuming messages with manual acknowledgment
-    channel.basicConsume(QUEUE_NAME, true, deliverCallback, consumerTag -> {
-    });
-
-    // Executor for managing other tasks (can be expanded)
-    executorService.submit(() -> {
-      while (true) {
-        Thread.sleep(1000); // Keeping the executor alive for long-running tasks
-      }
-    });
+    } catch (IOException | TimeoutException | InterruptedException e) {
+      throw new RuntimeException("Error initializing RabbitMQ connection: " + e.getMessage(), e);
+    }
   }
 
-  // Method to process LiftRide event and store data in Redis
-  public static void passLiftRideEvent(LiftRide liftRide, int skierID, int resortID,
-      String seasonID, String dayID) {
-    int liftID = liftRide.getLiftID();
-    int vertical = liftID * 10;  // Example calculation for vertical
+  private static void consumeMessages(Channel channel) {
+    try {
+      channel.basicConsume(QUEUE_NAME, true, new DefaultConsumer(channel) {
+        @Override
+        public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) {
+          String message = new String(body);
+          LiftRide liftRide = gson.fromJson(message, LiftRide.class);
 
-    // Storing skier's daily lift ride data in Redis
-    redis.sadd("skier:" + skierID + ":days", dayID);
-    redis.hincrBy("skier:" + skierID + ":vertical:" + dayID, "total", vertical);
-    redis.lpush("skier:" + skierID + ":lifts:" + dayID, String.valueOf(liftID));
-    redis.sadd("resort:" + resortID + ":day:" + dayID + ":skiers", String.valueOf(skierID));
+          // Process the message and store it in Redis
+          try (Jedis jedis = jedisPool.getResource()) {
+            // todo: modify redis key accordingly with GET request in assignment 4
+            jedis.lpush("skier:" + liftRide.getSkierID(), gson.toJson(liftRide));
+          } catch (Exception e) {
+            System.err.println("Error processing message for skierID " + liftRide.getSkierID() + ": " + e.getMessage());
+          }
+        }
+      });
+    } catch (IOException e) {
+      throw new RuntimeException("Error consuming messages: " + e.getMessage(), e);
+    }
+  }
 
-//    System.out.println(
-//        "Processed LiftRideEvent for skierID: " + skierID + ", resortID: " + resortID);
+  private static void destroy() {
+    try {
+      System.out.println("Shutting down executor service...");
+      executorService.shutdown();
+      if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+        executorService.shutdownNow();
+      }
+
+      System.out.println("Closing RabbitMQ channel...");
+      if (channel != null && channel.isOpen()) {
+        channel.close();
+      }
+
+      System.out.println("Closing RabbitMQ connection...");
+      if (connection != null && connection.isOpen()) {
+        connection.close();
+      }
+
+      System.out.println("Closing Redis pool...");
+      jedisPool.close();
+
+    } catch (IOException | TimeoutException | InterruptedException e) {
+      System.err.println("Error during shutdown: " + e.getMessage());
+    }
   }
 }
