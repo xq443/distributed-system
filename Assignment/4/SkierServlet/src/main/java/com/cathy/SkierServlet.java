@@ -76,8 +76,7 @@ public class SkierServlet extends HttpServlet {
         return;
       }
 
-      String skierID = requestData.getSkierID().toString(); // Assuming skierID is of type Integer
-      String message = packageMessage(skierID);
+      String message = packageMessage(requestData);
 
       // Send data to RabbitMQ message queue
       sendToMessageQueue(message);
@@ -108,9 +107,17 @@ public class SkierServlet extends HttpServlet {
     }
   }
 
-  private String packageMessage(String skierID) {
-    return "{\"skierID\":\"" + skierID + "\"}";
+  private String packageMessage(RequestData requestData) {
+    return "{"
+        + "\"skierID\":\"" + requestData.getSkierID() + "\","
+        + "\"resortID\":\"" + requestData.getResortID() + "\","
+        + "\"seasonID\":\"" + requestData.getSeasonID() + "\","
+        + "\"dayID\":\"" + requestData.getDayID() + "\","
+        + "\"time\":\"" + requestData.getTime() + "\","
+        + "\"liftID\":\"" + requestData.getLiftID() + "\""
+        + "}";
   }
+
 
   private String areParametersMissing(RequestData requestData) {
     StringBuilder missingParams = new StringBuilder();
