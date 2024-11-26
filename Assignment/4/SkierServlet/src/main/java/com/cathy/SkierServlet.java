@@ -19,14 +19,14 @@ public class SkierServlet extends HttpServlet {
 
   private final static String QUEUE_NAME = "SkierQueue";
   private static final ConnectionFactory factory = new ConnectionFactory();
-  private static final int CHANNEL_POOL_SIZE = 150;
+  private static final int CHANNEL_POOL_SIZE = 120;
   private static final BlockingQueue<Channel> channelPool = new LinkedBlockingQueue<>(CHANNEL_POOL_SIZE);
   private final Gson gson = new Gson();
   private static Connection connection;
 
   @Override
   public void init() {
-    factory.setHost("34.210.18.112"); // rabbitmq
+    factory.setHost("54.186.130.49"); // rabbitmq
     //factory.setConnectionTimeout(500000); // Set timeout to 50 seconds
     try {
       connection = factory.newConnection();
