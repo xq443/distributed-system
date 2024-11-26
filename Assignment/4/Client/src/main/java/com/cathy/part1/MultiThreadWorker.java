@@ -6,7 +6,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MultiThreadWorker {
-  public static final int TOTAL_REQUESTS = 20;
+  public static final int TOTAL_REQUESTS = 200000;
   public static final int THREADS = 100;
   public static final int REQUESTS_PER_THREAD = 10;
 
