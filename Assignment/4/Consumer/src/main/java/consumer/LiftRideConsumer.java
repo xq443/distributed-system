@@ -54,12 +54,18 @@ public class LiftRideConsumer {
         @Override
         public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) {
           String message = new String(body);
+//          System.out.println("Received message: " + message); // Log the raw JSON
           LiftRide liftRide = gson.fromJson(message, LiftRide.class);
 
           // Process the message and store it in Redis
           try (Jedis jedis = jedisPool.getResource()) {
             // todo: modify redis key accordingly with GET request in assignment 4
-            jedis.lpush("skier:" + liftRide.getSkierID(), gson.toJson(liftRide));
+            String newKey = "skier:" + liftRide.getSkierID() +
+                ":resort:" + liftRide.getResortID() +
+                ":season:" + liftRide.getSeasonID() +
+                ":day:" + liftRide.getDayID();
+
+            jedis.lpush(newKey, gson.toJson(liftRide));
           } catch (Exception e) {
             System.err.println("Error processing message for skierID " + liftRide.getSkierID() + ": " + e.getMessage());
           }
