@@ -10,11 +10,18 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeoutException;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
 
-@WebServlet("/")
+@WebServlet("/skiers/*")
 public class SkierServlet extends HttpServlet {
 
   private final static String QUEUE_NAME = "SkierQueue";
@@ -24,9 +31,13 @@ public class SkierServlet extends HttpServlet {
   private final Gson gson = new Gson();
   private static Connection connection;
 
+  private static final JedisPool jedisPool = new JedisPool(new JedisPoolConfig(), "localhost", 6379);
+
+
   @Override
   public void init() {
-    factory.setHost("54.186.130.49"); // rabbitmq
+    //factory.setHost("54.186.130.49"); // rabbitmq
+    factory.setHost("localhost");
     //factory.setConnectionTimeout(500000); // Set timeout to 50 seconds
     try {
       connection = factory.newConnection();
@@ -46,13 +57,12 @@ public class SkierServlet extends HttpServlet {
       throws IOException {
     response.setContentType("application/json");
 
+    // System.out.println("Received request body: " + bodyBuilder); // Log the request body
     StringBuilder bodyBuilder = new StringBuilder();
     String line;
     while ((line = request.getReader().readLine()) != null) {
       bodyBuilder.append(line);
     }
-
-    // System.out.println("Received request body: " + bodyBuilder); // Log the request body
 
     try {
       // Parse the JSON body into a RequestData object
@@ -63,7 +73,7 @@ public class SkierServlet extends HttpServlet {
       if (!missingParams.isEmpty()) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getOutputStream()
-            .print(gson.toJson(new ResponseData("Missing parameters: " + missingParams)));
+                .print(gson.toJson(new ResponseData("Missing parameters: " + missingParams)));
         return;
       }
 
@@ -72,10 +82,11 @@ public class SkierServlet extends HttpServlet {
       if (!invalidParams.isEmpty()) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getOutputStream()
-            .print(gson.toJson(new ResponseData("Invalid inputs: " + invalidParams)));
+                .print(gson.toJson(new ResponseData("Invalid inputs: " + invalidParams)));
         return;
       }
 
+      // Package message and send to RabbitMQ
       String message = packageMessage(requestData);
 
       // Send data to RabbitMQ message queue
@@ -109,13 +120,13 @@ public class SkierServlet extends HttpServlet {
 
   private String packageMessage(RequestData requestData) {
     return "{"
-        + "\"skierID\":\"" + requestData.getSkierID() + "\","
-        + "\"resortID\":\"" + requestData.getResortID() + "\","
-        + "\"seasonID\":\"" + requestData.getSeasonID() + "\","
-        + "\"dayID\":\"" + requestData.getDayID() + "\","
-        + "\"time\":\"" + requestData.getTime() + "\","
-        + "\"liftID\":\"" + requestData.getLiftID() + "\""
-        + "}";
+            + "\"skierID\":\"" + requestData.getSkierID() + "\","
+            + "\"resortID\":\"" + requestData.getResortID() + "\","
+            + "\"seasonID\":\"" + requestData.getSeasonID() + "\","
+            + "\"dayID\":\"" + requestData.getDayID() + "\","
+            + "\"time\":\"" + requestData.getTime() + "\","
+            + "\"liftID\":\"" + requestData.getLiftID() + "\""
+            + "}";
   }
 
 
@@ -187,7 +198,109 @@ public class SkierServlet extends HttpServlet {
 
   @Override
   protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
-    response.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
-    response.getOutputStream().print(gson.toJson(new ResponseData("GET method is not supported in this assignment. Please use POST.")));
+    response.setContentType("application/json");
+    String urlPath = request.getPathInfo();
+
+    if (urlPath == null || urlPath.isEmpty()) {
+      response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+      response.getWriter().write("{\"message\": \"Missing parameters\"}");
+      return;
+    }
+
+    String[] urlParts = urlPath.split("/");
+
+    try {
+      if (urlParts.length == 8 && urlParts[6].equals("skiers") && isUrlValid(urlParts)) {
+        // /skiers/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID}
+        getSkierID(response, urlParts);
+      } else if (urlParts.length == 3 && urlParts[2].equals("vertical") && isUrlValid(urlParts)) {
+        // /skiers/{skierID}/vertical
+        getSkierVertical(response, urlParts);
+      } else {
+        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+        response.getWriter().write("{\"message\": \"Invalid URL path\"}");
+      }
+    } catch (Exception e) {
+      response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+      response.getWriter().write("{\"message\": \"Internal server error\"}");
+      e.printStackTrace();
+    }
   }
+
+  private boolean isUrlValid(String[] urlPath) {
+    try {
+      if (urlPath.length == 8 && urlPath[6].equals("skiers")) {
+        int resortID = Integer.parseInt(urlPath[1]);
+        int skierID = Integer.parseInt(urlPath[7]);
+        int seasonID = Integer.parseInt(urlPath[3]);
+        return resortID == 1 && skierID >= 1 && skierID <= 100000 && seasonID == 2024;
+      } else if (urlPath.length == 3 && urlPath[2].equals("vertical")) {
+        int skierID = Integer.parseInt(urlPath[1]);
+        return skierID >= 1 && skierID <= 100000;
+      }
+    } catch (NumberFormatException e) {
+      return false;
+    }
+    return false;
+  }
+
+  private void getSkierID(HttpServletResponse response, String[] urlParts) throws IOException {
+    try (Jedis jedis = jedisPool.getResource()) {
+      int resortID = Integer.parseInt(urlParts[1]);
+      String seasonID = urlParts[3];
+      String dayID = urlParts[5];
+      int skierID = Integer.parseInt(urlParts[7]);
+
+
+      String redisKey = String.format("skier:%d:resort:%d:season:%s:day:%s", skierID, resortID, seasonID, dayID);
+      List<String> liftRides = jedis.lrange(redisKey, 0, -1);
+
+      if (liftRides.isEmpty()) {
+        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+        response.getWriter().write("{\"message\": \"No data found for the skier on the given day\"}");
+        return;
+      }
+      response.setStatus(HttpServletResponse.SC_OK);
+      response.getWriter().write(new Gson().toJson(liftRides));
+    } catch (NumberFormatException e) {
+      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+      response.getWriter().write("{\"message\": \"Invalid skierID or dayID\"}");
+    }
+  }
+
+  private void getSkierVertical(HttpServletResponse response, String[] urlParts) throws IOException {
+    try (Jedis jedis = jedisPool.getResource()) {
+      int skierID = Integer.parseInt(urlParts[1]);
+
+      String pattern = String.format("skier:%d:resort:*:season:*:day:*", skierID);
+      Set<String> keys = jedis.keys(pattern);
+
+      int totalVertical = 0;
+
+      for (String key : keys) {
+        List<String> rides = jedis.lrange(key, 0, -1);
+        for (String ride : rides) {
+          RequestData liftRide = new Gson().fromJson(ride, RequestData.class);
+          totalVertical += liftRide.getLiftID() * 10;
+        }
+      }
+
+      if (totalVertical == 0) {
+        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+        response.getWriter().write("{\"message\": \"No data found for the skier\"}");
+        return;
+      }
+
+      Map<String, Object> result = new HashMap<>();
+      result.put("skierID", skierID);
+      result.put("totalVertical", totalVertical);
+
+      response.setStatus(HttpServletResponse.SC_OK);
+      response.getWriter().write(new Gson().toJson(result));
+    } catch (NumberFormatException e) {
+      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+      response.getWriter().write("{\"message\": \"Invalid skierID\"}");
+    }
+  }
+
 }
