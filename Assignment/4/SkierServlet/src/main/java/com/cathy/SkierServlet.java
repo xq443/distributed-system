@@ -29,6 +29,7 @@ public class SkierServlet extends HttpServlet {
   private static final BlockingQueue<Channel> channelPool = new LinkedBlockingQueue<>(CHANNEL_POOL_SIZE);
   private final Gson gson = new Gson();
   private static Connection connection;
+  private Validation validation = new Validation();
 
   private static final JedisPool jedisPool = new JedisPool(new JedisPoolConfig(), "localhost", 6379);
 
@@ -68,7 +69,7 @@ public class SkierServlet extends HttpServlet {
       RequestData requestData = gson.fromJson(bodyBuilder.toString(), RequestData.class);
 
       // Validate missing parameters
-      if (areParametersMissing(requestData)) {
+      if (validation.areParametersMissing(requestData)) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getOutputStream()
                 .print(gson.toJson(new ResponseData("Missing parameters")));
@@ -76,7 +77,7 @@ public class SkierServlet extends HttpServlet {
       }
 
       // Validate parameter values
-      if (!areParametersValid(requestData)) {
+      if (!validation.areParametersValid(requestData)) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getOutputStream()
                 .print(gson.toJson(new ResponseData("Invalid inputs: check the values out of boundary")));
@@ -166,7 +167,7 @@ public class SkierServlet extends HttpServlet {
       String seasonID = urlParts[4];
       String dayID = urlParts[6];
 
-      if (!isValidResortID(resortID) || !isValidSeasonID(seasonID) || !isValidDayID(dayID)) {
+      if (!validation.isValidResortID(resortID) || !validation.isValidSeasonID(seasonID) || !validation.isValidDayID(dayID)) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getWriter().write("{\"message\": \"Invalid parameters\"}");
         return;
@@ -202,7 +203,7 @@ public class SkierServlet extends HttpServlet {
       String dayID = urlParts[6];
       Integer skierID = Integer.parseInt(urlParts[8]);
 
-      if (!isValidResortID(resortID) || !isValidSeasonID(seasonID) || !isValidDayID(dayID) || !isValidSkierID(skierID)) {
+      if (!validation.isValidResortID(resortID) || !validation.isValidSeasonID(seasonID) || !validation.isValidDayID(dayID) || !validation.isValidSkierID(skierID)) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getWriter().write("{\"message\": \"Invalid parameters\"}");
         return;
@@ -252,7 +253,7 @@ public class SkierServlet extends HttpServlet {
       Integer skierID = Integer.parseInt(urlParts[2]);
 
       // Validate skierID
-      if (!isValidSkierID(skierID)) {
+      if (!validation.isValidSkierID(skierID)) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getWriter().write("{\"message\": \"Invalid skierID\"}");
         return;
@@ -318,76 +319,6 @@ public class SkierServlet extends HttpServlet {
     } catch (IOException e) {
       System.err.println("Failed to close RabbitMQ connection: " + e.getMessage());
     }
-
     super.destroy();
-  }
-
-  // Helper methods for parameter validation
-  private boolean areParametersMissing(RequestData requestData) {
-    if (requestData == null) {
-      return true;
-    }
-
-    return requestData.getSkierID() == null ||
-        requestData.getResortID() == null ||
-        requestData.getLiftID() == null ||
-        requestData.getSeasonID() == null ||
-        requestData.getDayID() == null ||
-        requestData.getTime() == null;
-  }
-
-  private boolean areParametersValid(RequestData requestData) {
-    return isValidSkierID(requestData.getSkierID()) &&
-        isValidResortID(requestData.getResortID()) &&
-        isValidLiftID(requestData.getLiftID()) &&
-        isValidSeasonID(requestData.getSeasonID()) &&
-        isValidDayID(requestData.getDayID()) &&
-        isValidTimeID(requestData.getTime());
-  }
-
-
-  private boolean isValidResortID(Integer resortID) {
-    try {
-      return resortID >= 1 && resortID <= 10;
-    } catch (NumberFormatException e) {
-      return false;
-    }
-  }
-
-  private boolean isValidSeasonID(String seasonID) {
-    return "2024".equals(seasonID);
-  }
-
-  private boolean isValidDayID(String dayID) {
-    try {
-      int id = Integer.parseInt(dayID);
-      return id == 1;
-    } catch (NumberFormatException e) {
-      return false;
-    }
-  }
-
-  private boolean isValidSkierID(Integer skierID) {
-    try {
-      return skierID >= 1 && skierID <= 100000;
-    } catch (NumberFormatException e) {
-      return false;
-    }
-  }
-
-  private boolean isValidLiftID(Integer liftID) {
-    try {
-      return liftID >= 1 && liftID <= 40;
-    } catch (NumberFormatException e) {
-      return false;
-    }
-  }
-
-  private boolean isValidTimeID(Integer timeID) {
-    try {
-      return timeID >= 1 && timeID <= 360;
-    } catch (NumberFormatException e) {
-      return false;
-    }
   }
 }
