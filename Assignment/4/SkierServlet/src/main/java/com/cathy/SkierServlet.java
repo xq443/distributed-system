@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
-
 import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -21,7 +20,7 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 
-@WebServlet("/skiers/*")
+@WebServlet("/api/*")
 public class SkierServlet extends HttpServlet {
 
   private final static String QUEUE_NAME = "SkierQueue";
@@ -69,20 +68,18 @@ public class SkierServlet extends HttpServlet {
       RequestData requestData = gson.fromJson(bodyBuilder.toString(), RequestData.class);
 
       // Validate missing parameters
-      String missingParams = areParametersMissing(requestData);
-      if (!missingParams.isEmpty()) {
+      if (areParametersMissing(requestData)) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getOutputStream()
-                .print(gson.toJson(new ResponseData("Missing parameters: " + missingParams)));
+                .print(gson.toJson(new ResponseData("Missing parameters")));
         return;
       }
 
       // Validate parameter values
-      String invalidParams = areParametersValid(requestData);
-      if (!invalidParams.isEmpty()) {
+      if (!areParametersValid(requestData)) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getOutputStream()
-                .print(gson.toJson(new ResponseData("Invalid inputs: " + invalidParams)));
+                .print(gson.toJson(new ResponseData("Invalid inputs: check the values out of boundary")));
         return;
       }
 
@@ -129,50 +126,179 @@ public class SkierServlet extends HttpServlet {
             + "}";
   }
 
+  // Get request handler
+  @Override
+  protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    response.setContentType("application/json");
+    String urlPath = request.getPathInfo();
 
-  private String areParametersMissing(RequestData requestData) {
-    StringBuilder missingParams = new StringBuilder();
-
-    if (requestData == null) {
-      return "requestData";
+    if (urlPath == null || urlPath.isEmpty()) {
+      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+      response.getWriter().write("{\"message\": \"Missing URL path\"}");
+      return;
     }
-    if (requestData.getSkierID() == null) missingParams.append("skierID, ");
-    if (requestData.getResortID() == null) missingParams.append("resortID, ");
-    if (requestData.getLiftID() == null) missingParams.append("liftID, ");
-    if (requestData.getSeasonID() == null) missingParams.append("seasonID, ");
-    if (requestData.getDayID() == null) missingParams.append("dayID, ");
-    if (requestData.getTime() == null) missingParams.append("time, ");
 
-    return missingParams.toString().isEmpty() ? "" : missingParams.substring(0, missingParams.length() - 2);
+    String[] urlParts = urlPath.split("/");
+
+    // Handle GET /resorts/{resortID}/seasons/{seasonID}/day/{dayID}/skiers
+    if (urlParts.length == 8 && "seasons".equals(urlParts[3]) && "day".equals(urlParts[5])) {
+      handleUniqueSkiersNumber(request, response, urlParts);
+    }
+    // Handle GET /skiers/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID}
+    else if (urlParts.length == 9 && "seasons".equals(urlParts[3]) && "days".equals(urlParts[5]) && ("skiers".equals(urlParts[1]) || "skiers".equals(urlParts[7]))) {
+      handleTotalVerticalSkierForSpecificDay(request, response, urlParts);
+
+      // Handle /skiers/{skierID}/vertical
+    } else if (urlParts.length == 4 && "skiers".equals(urlParts[1]) && "vertical".equals(urlParts[3])) {
+      handleTotalVertical(request, response, urlParts);
+    }
+    else {
+      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+      response.getWriter().write("{\"message\": \"Invalid URL format\"}");
+    }
   }
 
-  private String areParametersValid(RequestData requestData) {
-    StringBuilder invalidParams = new StringBuilder();
+  // Handle GET /skiers/{resortID}/seasons/{seasonID}/day/{dayID}/skiers
+  // Test url: http://localhost:8080/SkierServlet_war_exploded/resorts/2/seasons/2024/day/1/skiers/200
+  private void handleUniqueSkiersNumber(HttpServletRequest request, HttpServletResponse response, String[] urlParts) throws IOException {
+    try {
+      Integer resortID = Integer.parseInt(urlParts[2]);
+      String seasonID = urlParts[4];
+      String dayID = urlParts[6];
 
-    if (requestData.getSkierID() < 1 || requestData.getSkierID() > 100000) {
-      invalidParams.append("skierID, ");
-    }
-    if (requestData.getResortID() < 1 || requestData.getResortID() > 10) {
-      invalidParams.append("resortID, ");
-    }
-    if (requestData.getLiftID() < 1 || requestData.getLiftID() > 40) {
-      invalidParams.append("liftID, ");
-    }
-    if (!"2024".equals(requestData.getSeasonID())) {
-      invalidParams.append("seasonID, ");
-    }
-    if (!"1".equals(requestData.getDayID())) {
-      invalidParams.append("dayID, ");
-    }
-    if (requestData.getTime() < 1 || requestData.getTime() > 360) {
-      invalidParams.append("time, ");
-    }
+      if (!isValidResortID(resortID) || !isValidSeasonID(seasonID) || !isValidDayID(dayID)) {
+        response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        response.getWriter().write("{\"message\": \"Invalid parameters\"}");
+        return;
+      }
 
-    return invalidParams.toString().isEmpty() ? "" : invalidParams.substring(0, invalidParams.length() - 2);
+      try (Jedis jedis = jedisPool.getResource()) {
+        String key = String.format("resort:%s:season:%s:day:%s", resortID, seasonID, dayID);
+        Set<String> skierIDs = jedis.smembers(key);
+
+        if (skierIDs == null || skierIDs.isEmpty()) {
+          response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+          response.getWriter().write("{\"message\": \"No skiers found for the given parameters\"}");
+        } else {
+          Map<String, Object> responseData = new HashMap<>();
+          responseData.put("numSkiers", skierIDs.size());
+          response.setStatus(HttpServletResponse.SC_OK);
+          response.getWriter().write(gson.toJson(responseData));
+        }
+      }
+
+    } catch (Exception e) {
+      response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+      response.getWriter().write("{\"message\": \"Server error: " + e.getMessage() + "\"}");
+    }
+  }
+
+  // Handle GET /skiers/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID}
+  // Test url: http://localhost:8080/SkierServlet_war_exploded/skiers/2/seasons/2024/day/1/skiers/200
+  private void handleTotalVerticalSkierForSpecificDay(HttpServletRequest request, HttpServletResponse response, String[] urlParts) throws IOException {
+    try {
+      Integer resortID = Integer.parseInt(urlParts[2]);
+      String seasonID = urlParts[4];
+      String dayID = urlParts[6];
+      Integer skierID = Integer.parseInt(urlParts[8]);
+
+      if (!isValidResortID(resortID) || !isValidSeasonID(seasonID) || !isValidDayID(dayID) || !isValidSkierID(skierID)) {
+        response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        response.getWriter().write("{\"message\": \"Invalid parameters\"}");
+        return;
+      }
+
+      // Fetch skier's lift ride data for the given day
+      try (Jedis jedis = jedisPool.getResource()) {
+        String key = String.format("resort:%s:season:%s:day:%s:skier:%s", resortID, seasonID, dayID, skierID);
+        // list type
+        List<String> liftRides = jedis.lrange(key, 0, -1);
+
+        if (liftRides == null || liftRides.isEmpty()) {
+          response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+          response.getWriter().write("{\"message\": \"No lift rides found for the specified skier\"}");
+        } else {
+          int totalVertical = 0;
+
+          for (String liftRide : liftRides) {
+            // calculated as liftID * 10
+            int liftID = Integer.parseInt(liftRide);
+            int verticalForThisRide = liftID * 10;
+            totalVertical += verticalForThisRide;
+          }
+
+          // response
+          Map<String, Object> responseData = new HashMap<>();
+          responseData.put("skierID", skierID);
+          responseData.put("resortID", resortID);
+          responseData.put("seasonID", seasonID);
+          responseData.put("dayID", dayID);
+          responseData.put("totalVertical", totalVertical);
+          response.setStatus(HttpServletResponse.SC_OK);
+          response.getWriter().write(gson.toJson(responseData));
+        }
+      }
+
+    } catch (Exception e) {
+      response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+      response.getWriter().write("{\"message\": \"Server error: " + e.getMessage() + "\"}");
+    }
+  }
+
+  // Handle GET /skiers/{skierID}/vertical
+  // Test url: http://localhost:8080/SkierServlet_war_exploded/skiers/200/vertical
+  private void handleTotalVertical(HttpServletRequest request, HttpServletResponse response, String[] urlParts) throws IOException {
+    try {
+      Integer skierID = Integer.parseInt(urlParts[2]);
+
+      // Validate skierID
+      if (!isValidSkierID(skierID)) {
+        response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        response.getWriter().write("{\"message\": \"Invalid skierID\"}");
+        return;
+      }
+
+      try (Jedis jedis = jedisPool.getResource()) {
+        // wildcard pattern to match keys for the skier across all resorts, seasons, and days
+        String pattern = String.format("resort:*:season:*:day:*:skier:%s", skierID);
+
+        Set<String> matchingKeys = jedis.keys(pattern); // Fetch all matching keys
+        if (matchingKeys == null || matchingKeys.isEmpty()) {
+          response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+          response.getWriter().write("{\"message\": \"No data found for the specified skier\"}");
+          return;
+        }
+
+        int totalVertical = 0;
+
+        for (String key : matchingKeys) {
+          List<String> liftRides = jedis.lrange(key, 0, -1);
+          for (String liftRide : liftRides) {
+            int liftID = Integer.parseInt(liftRide);
+            int verticalForThisRide = liftID * 10;
+            totalVertical += verticalForThisRide;
+          }
+        }
+
+        // response
+        Map<String, Object> responseData = new HashMap<>();
+        responseData.put("skierID", skierID);
+        responseData.put("totalVertical", totalVertical);
+        response.setStatus(HttpServletResponse.SC_OK);
+        response.getWriter().write(gson.toJson(responseData));
+      }
+
+    } catch (Exception e) {
+      response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+      response.getWriter().write("{\"message\": \"Server error: " + e.getMessage() + "\"}");
+    }
   }
 
   @Override
   public void destroy() {
+    // Close JedisPool to clean up any background threads
+    jedisPool.close();
+
     // Close each channel in the channel pool
     for (Channel channel : channelPool) {
       try {
@@ -196,111 +322,72 @@ public class SkierServlet extends HttpServlet {
     super.destroy();
   }
 
-  @Override
-  protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
-    response.setContentType("application/json");
-    String urlPath = request.getPathInfo();
-
-    if (urlPath == null || urlPath.isEmpty()) {
-      response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-      response.getWriter().write("{\"message\": \"Missing parameters\"}");
-      return;
+  // Helper methods for parameter validation
+  private boolean areParametersMissing(RequestData requestData) {
+    if (requestData == null) {
+      return true;
     }
 
-    String[] urlParts = urlPath.split("/");
-
-    try {
-      if (urlParts.length == 8 && urlParts[6].equals("skiers") && isUrlValid(urlParts)) {
-        // /skiers/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID}
-        getSkierID(response, urlParts);
-      } else if (urlParts.length == 3 && urlParts[2].equals("vertical") && isUrlValid(urlParts)) {
-        // /skiers/{skierID}/vertical
-        getSkierVertical(response, urlParts);
-      } else {
-        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-        response.getWriter().write("{\"message\": \"Invalid URL path\"}");
-      }
-    } catch (Exception e) {
-      response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-      response.getWriter().write("{\"message\": \"Internal server error\"}");
-      e.printStackTrace();
-    }
+    return requestData.getSkierID() == null ||
+        requestData.getResortID() == null ||
+        requestData.getLiftID() == null ||
+        requestData.getSeasonID() == null ||
+        requestData.getDayID() == null ||
+        requestData.getTime() == null;
   }
 
-  private boolean isUrlValid(String[] urlPath) {
+  private boolean areParametersValid(RequestData requestData) {
+    return isValidSkierID(requestData.getSkierID()) &&
+        isValidResortID(requestData.getResortID()) &&
+        isValidLiftID(requestData.getLiftID()) &&
+        isValidSeasonID(requestData.getSeasonID()) &&
+        isValidDayID(requestData.getDayID()) &&
+        isValidTimeID(requestData.getTime());
+  }
+
+
+  private boolean isValidResortID(Integer resortID) {
     try {
-      if (urlPath.length == 8 && urlPath[6].equals("skiers")) {
-        int resortID = Integer.parseInt(urlPath[1]);
-        int skierID = Integer.parseInt(urlPath[7]);
-        int seasonID = Integer.parseInt(urlPath[3]);
-        return resortID == 1 && skierID >= 1 && skierID <= 100000 && seasonID == 2024;
-      } else if (urlPath.length == 3 && urlPath[2].equals("vertical")) {
-        int skierID = Integer.parseInt(urlPath[1]);
-        return skierID >= 1 && skierID <= 100000;
-      }
+      return resortID >= 1 && resortID <= 10;
     } catch (NumberFormatException e) {
       return false;
     }
-    return false;
   }
 
-  private void getSkierID(HttpServletResponse response, String[] urlParts) throws IOException {
-    try (Jedis jedis = jedisPool.getResource()) {
-      int resortID = Integer.parseInt(urlParts[1]);
-      String seasonID = urlParts[3];
-      String dayID = urlParts[5];
-      int skierID = Integer.parseInt(urlParts[7]);
+  private boolean isValidSeasonID(String seasonID) {
+    return "2024".equals(seasonID);
+  }
 
-
-      String redisKey = String.format("skier:%d:resort:%d:season:%s:day:%s", skierID, resortID, seasonID, dayID);
-      List<String> liftRides = jedis.lrange(redisKey, 0, -1);
-
-      if (liftRides.isEmpty()) {
-        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-        response.getWriter().write("{\"message\": \"No data found for the skier on the given day\"}");
-        return;
-      }
-      response.setStatus(HttpServletResponse.SC_OK);
-      response.getWriter().write(new Gson().toJson(liftRides));
+  private boolean isValidDayID(String dayID) {
+    try {
+      int id = Integer.parseInt(dayID);
+      return id == 1;
     } catch (NumberFormatException e) {
-      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-      response.getWriter().write("{\"message\": \"Invalid skierID or dayID\"}");
+      return false;
     }
   }
 
-  private void getSkierVertical(HttpServletResponse response, String[] urlParts) throws IOException {
-    try (Jedis jedis = jedisPool.getResource()) {
-      int skierID = Integer.parseInt(urlParts[1]);
-
-      String pattern = String.format("skier:%d:resort:*:season:*:day:*", skierID);
-      Set<String> keys = jedis.keys(pattern);
-
-      int totalVertical = 0;
-
-      for (String key : keys) {
-        List<String> rides = jedis.lrange(key, 0, -1);
-        for (String ride : rides) {
-          RequestData liftRide = new Gson().fromJson(ride, RequestData.class);
-          totalVertical += liftRide.getLiftID() * 10;
-        }
-      }
-
-      if (totalVertical == 0) {
-        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-        response.getWriter().write("{\"message\": \"No data found for the skier\"}");
-        return;
-      }
-
-      Map<String, Object> result = new HashMap<>();
-      result.put("skierID", skierID);
-      result.put("totalVertical", totalVertical);
-
-      response.setStatus(HttpServletResponse.SC_OK);
-      response.getWriter().write(new Gson().toJson(result));
+  private boolean isValidSkierID(Integer skierID) {
+    try {
+      return skierID >= 1 && skierID <= 100000;
     } catch (NumberFormatException e) {
-      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-      response.getWriter().write("{\"message\": \"Invalid skierID\"}");
+      return false;
     }
   }
 
+  private boolean isValidLiftID(Integer liftID) {
+    try {
+      return liftID >= 1 && liftID <= 40;
+    } catch (NumberFormatException e) {
+      return false;
+    }
+  }
+
+  private boolean isValidTimeID(Integer timeID) {
+    try {
+      return timeID >= 1 && timeID <= 360;
+    } catch (NumberFormatException e) {
+      return false;
+    }
+  }
 }
