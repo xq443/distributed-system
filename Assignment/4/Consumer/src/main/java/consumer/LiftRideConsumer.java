@@ -17,7 +17,7 @@ public class LiftRideConsumer {
   private static final Gson gson = new Gson();
   private static final ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
-  private static final JedisPool jedisPool = new JedisPool(new JedisPoolConfig(), "35.89.186.254", 6379); // host same as consumer
+  private static final JedisPool jedisPool = new JedisPool(new JedisPoolConfig(), "localhost", 6379); // host same as consumer
 
   private static Connection connection;
   private static Channel channel;
@@ -25,7 +25,7 @@ public class LiftRideConsumer {
   public static void main(String[] args) {
     try {
       // Initialize RabbitMQ connection and channel
-      factory.setHost("54.186.130.49");
+      factory.setHost("localhost");
       connection = factory.newConnection();
       channel = connection.createChannel();
       channel.queueDeclare(QUEUE_NAME, false, false, false, null);
@@ -54,18 +54,25 @@ public class LiftRideConsumer {
         @Override
         public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) {
           String message = new String(body);
-//          System.out.println("Received message: " + message); // Log the raw JSON
+          System.out.println("Received message: " + message); // Log the raw JSON
           LiftRide liftRide = gson.fromJson(message, LiftRide.class);
 
           // Process the message and store it in Redis
           try (Jedis jedis = jedisPool.getResource()) {
-            // todo: modify redis key accordingly with GET request in assignment 4
-            String newKey = "skier:" + liftRide.getSkierID() +
-                ":resort:" + liftRide.getResortID() +
+            String redisKey1 = "resort:" + liftRide.getResortID() +
                 ":season:" + liftRide.getSeasonID() +
                 ":day:" + liftRide.getDayID();
+            jedis.sadd(redisKey1, String.valueOf(liftRide.getSkierID()));
 
-            jedis.lpush(newKey, gson.toJson(liftRide));
+//            long uniqueSkierCount = jedis.scard(redisKey1);
+//            System.out.println("Unique skier count for " + redisKey + ": " + uniqueSkierCount);
+
+            String redisKey2 = "resort:" + liftRide.getResortID() +
+                ":season:" + liftRide.getSeasonID() +
+                ":day:" + liftRide.getDayID() +
+                ":skier:" + liftRide.getSkierID();
+
+            jedis.lpush(redisKey2, String.valueOf(liftRide.getLiftID()));
           } catch (Exception e) {
             System.err.println("Error processing message for skierID " + liftRide.getSkierID() + ": " + e.getMessage());
           }
@@ -75,6 +82,7 @@ public class LiftRideConsumer {
       throw new RuntimeException("Error consuming messages: " + e.getMessage(), e);
     }
   }
+
 
   private static void destroy() {
     try {
