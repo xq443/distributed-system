@@ -12,12 +12,12 @@ import java.util.concurrent.*;
 public class LiftRideConsumer {
 
   private static final String QUEUE_NAME = "SkierQueue";
-  private static final int THREAD_POOL_SIZE = 320;
+  private static final int THREAD_POOL_SIZE = 80;
   private static final ConnectionFactory factory = new ConnectionFactory();
   private static final Gson gson = new Gson();
   private static final ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
-  private static final JedisPool jedisPool = new JedisPool(new JedisPoolConfig(), "localhost", 6379); // host same as consumer
+  private static final JedisPool jedisPool = new JedisPool(new JedisPoolConfig(), "34.220.115.172", 6379); // host same as consumer
 
   private static Connection connection;
   private static Channel channel;
@@ -25,7 +25,7 @@ public class LiftRideConsumer {
   public static void main(String[] args) {
     try {
       // Initialize RabbitMQ connection and channel
-      factory.setHost("localhost");
+      factory.setHost("44.244.169.72");
       connection = factory.newConnection();
       channel = connection.createChannel();
       channel.queueDeclare(QUEUE_NAME, false, false, false, null);
@@ -54,7 +54,7 @@ public class LiftRideConsumer {
         @Override
         public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) {
           String message = new String(body);
-          System.out.println("Received message: " + message); // Log the raw JSON
+          // System.out.println("Received message: " + message); // Log the raw JSON
           LiftRide liftRide = gson.fromJson(message, LiftRide.class);
 
           // Process the message and store it in Redis
