@@ -175,20 +175,25 @@ public class SkierServlet extends HttpServlet {
 
       try (Jedis jedis = jedisPool.getResource()) {
         String key = String.format("resort:%s:season:%s:day:%s", resortID, seasonID, dayID);
-        Set<String> skierIDs = jedis.smembers(key);
 
-        if (skierIDs == null || skierIDs.isEmpty()) {
+        // get the count of unique skiers without fetching all skier IDs
+        long skierCount = jedis.scard(key);
+        if (skierCount == 0) {
           response.setStatus(HttpServletResponse.SC_NOT_FOUND);
           response.getWriter().write("{\"message\": \"No skiers found for the given parameters\"}");
         } else {
           Map<String, Object> responseData = new HashMap<>();
-          responseData.put("numSkiers", skierIDs.size());
+          responseData.put("numSkiers", skierCount);
           response.setStatus(HttpServletResponse.SC_OK);
           response.getWriter().write(gson.toJson(responseData));
         }
       }
-
+    } catch (NumberFormatException e) {
+      // Handle invalid number format in URL
+      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+      response.getWriter().write("{\"message\": \"Invalid number format in parameters\"}");
     } catch (Exception e) {
+      // General error handling
       response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
       response.getWriter().write("{\"message\": \"Server error: " + e.getMessage() + "\"}");
     }
@@ -222,10 +227,9 @@ public class SkierServlet extends HttpServlet {
           int totalVertical = 0;
 
           for (String liftRide : liftRides) {
-            // calculated as liftID * 10
             int liftID = Integer.parseInt(liftRide);
             int verticalForThisRide = liftID * 10;
-            System.out.println("liftID: " + liftID + " verticalForThisRide: " + verticalForThisRide);
+//            System.out.println("liftID: " + liftID + " verticalForThisRide: " + verticalForThisRide);
             totalVertical += verticalForThisRide;
             System.out.println(totalVertical);
           }
