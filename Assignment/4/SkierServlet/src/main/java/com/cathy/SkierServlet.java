@@ -225,7 +225,9 @@ public class SkierServlet extends HttpServlet {
             // calculated as liftID * 10
             int liftID = Integer.parseInt(liftRide);
             int verticalForThisRide = liftID * 10;
+            System.out.println("liftID: " + liftID + " verticalForThisRide: " + verticalForThisRide);
             totalVertical += verticalForThisRide;
+            System.out.println(totalVertical);
           }
 
           // response
@@ -250,9 +252,8 @@ public class SkierServlet extends HttpServlet {
   // Test url: http://localhost:8080/SkierServlet_war_exploded/skiers/200/vertical
   private void handleTotalVertical(HttpServletRequest request, HttpServletResponse response, String[] urlParts) throws IOException {
     try {
+      // Parse and validate skierID
       Integer skierID = Integer.parseInt(urlParts[2]);
-
-      // Validate skierID
       if (!validation.isValidSkierID(skierID)) {
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.getWriter().write("{\"message\": \"Invalid skierID\"}");
@@ -260,35 +261,36 @@ public class SkierServlet extends HttpServlet {
       }
 
       try (Jedis jedis = jedisPool.getResource()) {
-        // wildcard pattern to match keys for the skier across all resorts, seasons, and days
-        String pattern = String.format("resort:*:season:*:day:*:skier:%s", skierID);
+        String verticalKey = "skier:" + skierID + ":vertical";
+        Map<String, String> verticalData = jedis.hgetAll(verticalKey);
 
-        Set<String> matchingKeys = jedis.keys(pattern); // Fetch all matching keys
-        if (matchingKeys == null || matchingKeys.isEmpty()) {
+        if (verticalData.isEmpty()) {
           response.setStatus(HttpServletResponse.SC_NOT_FOUND);
           response.getWriter().write("{\"message\": \"No data found for the specified skier\"}");
           return;
         }
 
-        int totalVertical = 0;
+        // Calculate total vertical
+        int totalVertical = verticalData.values().stream()
+            .mapToInt(Integer::parseInt)
+            .sum();
 
-        for (String key : matchingKeys) {
-          List<String> liftRides = jedis.lrange(key, 0, -1);
-          for (String liftRide : liftRides) {
-            int liftID = Integer.parseInt(liftRide);
-            int verticalForThisRide = liftID * 10;
-            totalVertical += verticalForThisRide;
-          }
-        }
+//        verticalData.forEach((key, value) -> {
+//          System.out.println("Resort/Season: " + key + ", Vertical: " + value);
+//        });
 
-        // response
         Map<String, Object> responseData = new HashMap<>();
         responseData.put("skierID", skierID);
         responseData.put("totalVertical", totalVertical);
+        responseData.put("details", verticalData);
+
         response.setStatus(HttpServletResponse.SC_OK);
         response.getWriter().write(gson.toJson(responseData));
       }
 
+    } catch (NumberFormatException e) {
+      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+      response.getWriter().write("{\"message\": \"Invalid skierID format\"}");
     } catch (Exception e) {
       response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
       response.getWriter().write("{\"message\": \"Server error: " + e.getMessage() + "\"}");
